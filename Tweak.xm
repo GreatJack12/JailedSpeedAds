@@ -295,3 +295,11 @@ static void hooked_dispatch_after(dispatch_time_t when,
     }
     orig_dispatch_after(when, queue, block);
 }
+
+// Install the dispatch_after hook at load time
+__attribute__((constructor))
+static void installDispatchAfterHook() {
+    MSHookFunction((void *)dispatch_after,
+                   (void *)hooked_dispatch_after,
+                   (void **)&orig_dispatch_after);
+}
