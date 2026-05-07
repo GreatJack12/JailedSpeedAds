@@ -8,13 +8,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Theos
-        uses: theos/theos-action@v1
-        with:
-          caching: false
+      - name: Install Theos
+        run: |
+          set -e
+          export THEOS=~/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          curl -LO https://github.com/theos/sdks/releases/download/2024Q4/iPhoneOS16.5.sdk.tar.xz
+          tar -xf iPhoneOS16.5.sdk.tar.xz -C $THEOS/sdks
 
       - name: Build DEB
-        run: make package FINALPACKAGE=1
+        run: |
+          export THEOS=~/theos
+          make package FINALPACKAGE=1
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
