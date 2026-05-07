@@ -56,25 +56,6 @@ void hookMethods() {
     MSHookMessageEx(objc_getClass("SCSnapAdsOnDeviceInfoRecordCoordinator"), @selector(removeAllOnDeviceInfoRecordsForSaid:completionQueue:completionBlock:), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("SCSnapAdsServeResponseDataStore"), @selector(_removeAdResponseForIdentifier:), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("SCSnapAdsServeResponseDataStore"), @selector(removeAdResponseForIdentifier:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSNetService"), @selector(publish), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSNetService"), @selector(stop), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSNetService"), @selector(addresses), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSNetService"), @selector(initWithCFNetService:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSNetServiceBrowser"), @selector(stop), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLConnectionInternalConnection"), @selector(cancelAuthenticationChallenge:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLConnectionInternalConnection"), @selector(_timingData), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLSessionTaskHTTPAuthenticator"), @selector(sessionTaskHTTPAuthenticatorWithContext:statusCodes:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLSessionTaskHTTPAuthenticator"), @selector(setStatusCodes:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLSessionTaskLocalHTTPAuthenticator"), @selector(externalAuthenticator), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(dataTaskWithRequest:completionHandler:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(forwardingTargetForSelector:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(dataTaskWithRequest:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(uploadTaskWithStreamedRequest:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(_groupConfiguration), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(_groupSession), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLConnectionInternal"), @selector(useCredential:forAuthenticationChallenge:), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLConnectionInternal"), @selector(_timingData), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLSessionXPC"), @selector(initialize), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("FPUserCredentials"), @selector(adremoval_enabled), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("ALIncentivizedInterstitialAd"), @selector(isReadyForDisplay), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("ALMediatedAd"), @selector(isReady), (IMP)returnNo, NULL);
@@ -174,12 +155,6 @@ void hookMethods() {
     MSHookMessageEx(objc_getClass("ISLWSProgRvSmash"), @selector(isAdValid), (IMP)returnNo, NULL);
 
     // Dealloc hooks (kept from original)
-    MSHookMessageEx(objc_getClass("NSNetService"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSNetServiceBrowser"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NWStreamPair"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("__NSCFURLLocalStreamTaskFromDataTaskDataBlobby"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLSessionTaskBackgroundHTTPAuthenticator"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("NSURLSessionTaskDependency"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
 
     // Jailbreak detection bypass
     MSHookMessageEx(objc_getClass("BUDeviceHelper"), @selector(bu_isJailBroken), (IMP)returnNo, NULL);
@@ -225,81 +200,3 @@ static void initialize() {
 }
 
 %end
-
-// ─── AVPlayerItem: skip to end as soon as playback starts ────────
-// When currentTime updates (playback is live), immediately seek to
-// the very end of the item. This fires the "did play to end" callback
-// which most ad SDKs use to unlock the reward / close button.
-%hook AVPlayerItem
-
-- (void)setStatus:(NSInteger)status {
-    %orig(status);
-    // Status 1 = AVPlayerItemStatusReadyToPlay
-    if (status == 1) {
-        CMTime end = self.duration;
-        // Only seek if we have a valid finite duration
-        if (CMTIME_IS_VALID(end) && !CMTIME_IS_INDEFINITE(end)) {
-            [self seekToTime:end
-             toleranceBefore:kCMTimeZero
-              toleranceAfter:kCMTimeZero];
-        }
-    }
-}
-
-%end
-
-// ─── NSTimer: collapse post-ad waiting countdowns ─────────────────
-// Many games show a "Reward earned!" screen with a short countdown
-// before the close button appears. This is almost always an NSTimer.
-// We shrink any timer interval >= 1 s down to 0.01 s so it fires
-// almost immediately, killing the waiting screen fast.
-%hook NSTimer
-
-+ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval
-                                     target:(id)target
-                                   selector:(SEL)selector
-                                   userInfo:(id)userInfo
-                                    repeats:(BOOL)repeats {
-    NSTimeInterval fast = (interval >= 1.0) ? 0.01 : interval;
-    return %orig(fast, target, selector, userInfo, repeats);
-}
-
-+ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval
-                                 invocation:(NSInvocation *)invocation
-                                    repeats:(BOOL)repeats {
-    NSTimeInterval fast = (interval >= 1.0) ? 0.01 : interval;
-    return %orig(fast, invocation, repeats);
-}
-
-%end
-
-// ─── dispatch_after: collapse GCD-based post-ad delays ───────────
-// Some newer ad SDKs use dispatch_after instead of NSTimer for the
-// post-ad countdown. This replaces any delay >= 1 s with 0.01 s.
-static void (*orig_dispatch_after)(dispatch_time_t when,
-                                   dispatch_queue_t queue,
-                                   dispatch_block_t block);
-
-static void hooked_dispatch_after(dispatch_time_t when,
-                                  dispatch_queue_t queue,
-                                  dispatch_block_t block) {
-    // Convert the absolute time back to an interval from now
-    // dispatch_time_t is nanoseconds from the mach absolute time epoch;
-    // comparing against DISPATCH_TIME_NOW + 1s is a safe proxy.
-    dispatch_time_t oneSecondFromNow = dispatch_time(DISPATCH_TIME_NOW,
-                                                      (int64_t)(1.0 * NSEC_PER_SEC));
-    if (when > oneSecondFromNow) {
-        // Collapse to 10 ms from now
-        when = dispatch_time(DISPATCH_TIME_NOW,
-                             (int64_t)(0.01 * NSEC_PER_SEC));
-    }
-    orig_dispatch_after(when, queue, block);
-}
-
-// Install the dispatch_after hook at load time
-__attribute__((constructor))
-static void installDispatchAfterHook() {
-    MSHookFunction((void *)dispatch_after,
-                   (void *)hooked_dispatch_after,
-                   (void **)&orig_dispatch_after);
-}
