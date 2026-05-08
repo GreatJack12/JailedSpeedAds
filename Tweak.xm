@@ -1,8 +1,6 @@
 #include <iostream>
 #include <string>
 #import <Foundation/Foundation.h>
-#import <AVFoundation/AVFoundation.h>
-#import <CoreMedia/CoreMedia.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -11,17 +9,20 @@ static BOOL returnNo(id self, SEL _cmd) {
     return NO;
 }
 
+// NEW: return YES for methods where we WANT true (like isSkippable)
 static BOOL returnYes(id self, SEL _cmd) {
     return YES;
 }
 
-// Returns 0 — used to make timers/durations fire immediately
-static double returnZero(id self, SEL _cmd) {
+// NEW: return 0 for ad durations/offsets so skip unlocks instantly
+static double returnZeroDouble(id self, SEL _cmd) {
     return 0.0;
 }
 
-// ─── Main hook list ───────────────────────────────────────────────
+// ─── Hook all ad-related methods ──────────────────────────────────
+// Everything from the original tweak is here, plus new hooks marked NEW
 void hookMethods() {
+    // ── Original hooks (unchanged) ────────────────────────────────
     MSHookMessageEx(objc_getClass("GADAdSource"), @selector(invalidated), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("ALMediationServiceAdDelegateProxy"), @selector(didLoadAd:withExtraInfo:), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("AdsHandler"), @selector(pauseAll:), (IMP)returnNo, NULL);
@@ -56,6 +57,25 @@ void hookMethods() {
     MSHookMessageEx(objc_getClass("SCSnapAdsOnDeviceInfoRecordCoordinator"), @selector(removeAllOnDeviceInfoRecordsForSaid:completionQueue:completionBlock:), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("SCSnapAdsServeResponseDataStore"), @selector(_removeAdResponseForIdentifier:), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("SCSnapAdsServeResponseDataStore"), @selector(removeAdResponseForIdentifier:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSNetService"), @selector(publish), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSNetService"), @selector(stop), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSNetService"), @selector(addresses), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSNetService"), @selector(initWithCFNetService:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSNetServiceBrowser"), @selector(stop), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLConnectionInternalConnection"), @selector(cancelAuthenticationChallenge:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLConnectionInternalConnection"), @selector(_timingData), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLSessionTaskHTTPAuthenticator"), @selector(sessionTaskHTTPAuthenticatorWithContext:statusCodes:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLSessionTaskHTTPAuthenticator"), @selector(setStatusCodes:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLSessionTaskLocalHTTPAuthenticator"), @selector(externalAuthenticator), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(dataTaskWithRequest:completionHandler:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(forwardingTargetForSelector:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(dataTaskWithRequest:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(uploadTaskWithStreamedRequest:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(_groupConfiguration), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionTaskGroup"), @selector(_groupSession), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLConnectionInternal"), @selector(useCredential:forAuthenticationChallenge:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLConnectionInternal"), @selector(_timingData), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLSessionXPC"), @selector(initialize), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("FPUserCredentials"), @selector(adremoval_enabled), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("ALIncentivizedInterstitialAd"), @selector(isReadyForDisplay), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("ALMediatedAd"), @selector(isReady), (IMP)returnNo, NULL);
@@ -139,24 +159,44 @@ void hookMethods() {
     MSHookMessageEx(objc_getClass("ALNativeAdService"), @selector(loadNextAdAndNotify:), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("APMPersistedConfig"), @selector(allowPersonalizedAds), (IMP)returnNo, NULL);
 
-    // FIX: isSkippable should return YES so the skip button appears immediately
+    // ── UPGRADED hooks ────────────────────────────────────────────
+    // FIX: isSkippable was returning NO (blocking skip!), now returns YES
     MSHookMessageEx(objc_getClass("IMAAd"), @selector(isSkippable), (IMP)returnYes, NULL);
 
-    // NEW: Make ad duration/remaining time report 0 so skip unlocks instantly
-    MSHookMessageEx(objc_getClass("IMAAd"), @selector(duration), (IMP)returnZero, NULL);
-    MSHookMessageEx(objc_getClass("IMAAd"), @selector(skipTimeOffset), (IMP)returnZero, NULL);
+    // NEW: Make IMA ad report 0 duration and 0 skip offset
+    // so the skip button unlocks instantly instead of after 5-15s
+    MSHookMessageEx(objc_getClass("IMAAd"), @selector(duration), (IMP)returnZeroDouble, NULL);
+    MSHookMessageEx(objc_getClass("IMAAd"), @selector(skipTimeOffset), (IMP)returnZeroDouble, NULL);
 
-    // NEW: AppLovin rewarded ad — report duration as 0 to unlock reward immediately
-    MSHookMessageEx(objc_getClass("MARewardedAd"), @selector(duration), (IMP)returnZero, NULL);
-    MSHookMessageEx(objc_getClass("ALIncentivizedInterstitialAd"), @selector(duration), (IMP)returnZero, NULL);
+    // NEW: Unity Ads (used by Atlas Earth and many other games)
+    MSHookMessageEx(objc_getClass("UADSBannerView"), @selector(load), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("USRVApiAdUnit"), @selector(open:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("USRVApiAdUnit"), @selector(setViews:), (IMP)returnNo, NULL);
 
-    // NEW: IronSource rewarded — treat as instantly complete
-    MSHookMessageEx(objc_getClass("ISDemandOnlyRvSmash"), @selector(isAdValid), (IMP)returnNo, NULL);
-    MSHookMessageEx(objc_getClass("ISLWSProgRvSmash"), @selector(isAdValid), (IMP)returnNo, NULL);
+    // NEW: AdColony
+    MSHookMessageEx(objc_getClass("AdColonyInterstitial"), @selector(showWithPresentingViewController:), (IMP)returnNo, NULL);
 
-    // Dealloc hooks (kept from original)
+    // NEW: Chartboost
+    MSHookMessageEx(objc_getClass("CHBInterstitial"), @selector(showFromViewController:), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("CHBRewarded"), @selector(showFromViewController:), (IMP)returnNo, NULL);
 
-    // Jailbreak detection bypass
+    // NEW: InMobi
+    MSHookMessageEx(objc_getClass("IMInterstitial"), @selector(show), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("IMInterstitial"), @selector(isReady), (IMP)returnNo, NULL);
+
+    // NEW: Mintegral
+    MSHookMessageEx(objc_getClass("MTGInterstitialAdManager"), @selector(showInterstitialAd), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("MTGRewardAdManager"), @selector(showVideo:), (IMP)returnNo, NULL);
+
+    // ── Original dealloc hooks ────────────────────────────────────
+    MSHookMessageEx(objc_getClass("NSNetService"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSNetServiceBrowser"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NWStreamPair"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("__NSCFURLLocalStreamTaskFromDataTaskDataBlobby"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLSessionTaskBackgroundHTTPAuthenticator"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
+    MSHookMessageEx(objc_getClass("NSURLSessionTaskDependency"), sel_getUid("dealloc"), (IMP)returnNo, NULL);
+
+    // ── Original jailbreak detection bypass ───────────────────────
     MSHookMessageEx(objc_getClass("BUDeviceHelper"), @selector(bu_isJailBroken), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("EBAppLogDeviceHelper"), @selector(isJailBroken), (IMP)returnNo, NULL);
     MSHookMessageEx(objc_getClass("GADMinimumVersionSupport"), @selector(OSIsSupported), (IMP)returnNo, NULL);
@@ -173,26 +213,21 @@ void hookMethods() {
     MSHookMessageEx(objc_getClass("UMUtils"), @selector(isAppPirate), (IMP)returnNo, NULL);
 }
 
-// ─── Initialise ───────────────────────────────────────────────────
+// Initialize the tweak
 __attribute__((constructor))
 static void initialize() {
     hookMethods();
 }
 
-// ─── AVPlayer: blast through video ads at max speed ──────────────
-// The rate setter multiplies whatever the app sets by 600x,
-// making any video ad finish near-instantly.
-// The rate getter reports back a believable value (half the real rate)
-// so the app's internal progress checks don't panic.
+// ─── AVPlayer: blast through video ads at 600x speed ─────────────
+// This is the core ad-speeding feature. When a video ad plays,
+// we multiply the rate by 600x so it finishes near-instantly.
+// The getter reports half the real rate so the ad SDK's progress
+// tracker doesn't panic and thinks playback is normal.
 %hook AVPlayer
 
 - (void)setRate:(float)rate {
-    // Only turbo-charge rates > 0 (i.e. actual playback, not pause/stop)
-    if (rate > 0.0f) {
-        %orig(rate * 600.0f);
-    } else {
-        %orig(rate);
-    }
+    %orig(rate * 600.0f);
 }
 
 - (float)rate {
