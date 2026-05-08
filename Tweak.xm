@@ -235,3 +235,37 @@ static void initialize() {
 }
 
 %end
+// ─── WKWebView: speed up HTML5 video ads (used by Unity Ads, etc.) ──
+// Many modern ad SDKs (including Unity Ads in Atlas Earth) play ads
+// inside a WKWebView using HTML5 <video> tags. AVPlayer hooks don't
+// touch these. This injects JavaScript that sets playbackRate to 16x
+// on every video element as soon as the page loads.
+%hook WKWebView
+
+- (void)didMoveToWindow {
+    %orig;
+    NSString *speedJS = @"(function(){"
+        "function s(){document.querySelectorAll('video').forEach(function(v){"
+        "v.playbackRate=16.0;v.muted=true;"
+        "v.addEventListener('play',function(){this.playbackRate=16.0;});"
+        "});}"
+        "s();new MutationObserver(s).observe(document.body||document.documentElement,"
+        "{childList:true,subtree:true});"
+        "})();";
+    [self evaluateJavaScript:speedJS completionHandler:nil];
+}
+
+- (void)setNavigationDelegate:(id)delegate {
+    %orig(delegate);
+    NSString *speedJS = @"(function(){"
+        "function s(){document.querySelectorAll('video').forEach(function(v){"
+        "v.playbackRate=16.0;v.muted=true;"
+        "v.addEventListener('play',function(){this.playbackRate=16.0;});"
+        "});}"
+        "s();new MutationObserver(s).observe(document.body||document.documentElement,"
+        "{childList:true,subtree:true});"
+        "})();";
+    [self evaluateJavaScript:speedJS completionHandler:nil];
+}
+
+%end
