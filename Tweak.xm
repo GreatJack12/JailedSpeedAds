@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #import <Foundation/Foundation.h>
+#import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 
